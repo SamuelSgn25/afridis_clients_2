@@ -11,7 +11,7 @@ import dns from 'dns';
 
 dotenv.config();
 
-console.log('[DB CHECK]', process.env.DB_HOST, process.env.DB_NAME, process.env.DB_USER);
+//console.log('[DB CHECK]', process.env.DB_HOST, process.env.DB_NAME, process.env.DB_USER);
 
 try {
   dns.setDefaultResultOrder('ipv4first');
@@ -20,6 +20,11 @@ try {
 }
 
 async function runStartupMigrations() {
+
+   console.log('[DB CHECK] connectionString:', 
+    `postgresql://${process.env.DB_USER}:[PASSWORD]@${process.env.DB_HOST}/${process.env.DB_NAME}?sslmode=require`
+	      );
+    
   try {
     await pool.query('CREATE TABLE IF NOT EXISTS app_migrations (name VARCHAR(255) PRIMARY KEY, executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL');
