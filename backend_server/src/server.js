@@ -11,6 +11,8 @@ import dns from 'dns';
 
 dotenv.config();
 
+console.log('[DB CHECK]', process.env.DB_HOST, process.env.DB_NAME, process.env.DB_USER);
+
 try {
   dns.setDefaultResultOrder('ipv4first');
 } catch (e) {
