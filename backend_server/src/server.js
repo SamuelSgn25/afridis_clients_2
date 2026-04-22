@@ -104,15 +104,17 @@ app.use(helmet());
 app.use(cookieParser());
 
 const allowedOrigins = [
-  process.env.CORS_ORIGIN || 'https://anyx-afridis.alwaysdata.net:5173',
-  'https://anyx-afridis.alwaysdata.net:5174'
+  process.env.CORS_ORIGIN || 'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
 ];
 
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow any localhost / 127.0.0.1 locally, or domains in allowedOrigins
-      if (!origin || allowedOrigins.includes(origin) || (origin && (origin.startsWith('https://anyx-afridis.alwaysdata.net') || origin.startsWith('http://127.0.0.1')))) {
+      if (!origin || allowedOrigins.includes(origin) || (origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')))) {
         return callback(null, true);
       }
       return callback(new Error('Not allowed by CORS'));
@@ -145,8 +147,8 @@ async function startServer() {
   await runStartupMigrations();
   app.listen(PORT, () => {
     console.log(`Serveur demarre sur le port ${PORT}`);
-    console.log(`API disponible sur https://anyx-afridis.alwaysdata.net:${PORT}/api`);
-    console.log(`Health check: https://anyx-afridis.alwaysdata.net:${PORT}/health`);
+    console.log(`API disponible sur http://localhost:${PORT}/api`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
   });
 }
 
