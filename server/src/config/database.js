@@ -5,12 +5,18 @@ dotenv.config();
 
 const { Pool } = pg;
 
+// Construire la connectionString avec sslmode=require
+let connectionString = process.env.DATABASE_URL || 
+  `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}/${process.env.DB_NAME}`;
+
+// Ajouter sslmode=require si pas déjà présent
+if (!connectionString.includes('sslmode')) {
+  connectionString += connectionString.includes('?') ? '&sslmode=require' : '?sslmode=require';
+}
+
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+  connectionString,
+  ssl: { rejectUnauthorized: false },
   max: 50,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
