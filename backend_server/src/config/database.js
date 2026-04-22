@@ -3,8 +3,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const { Pool } = pg;
-
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT,
@@ -14,9 +12,12 @@ const pool = new Pool({
   max: 50,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
-  ssl: {
-    rejectUnauthorized: false,
-  }
+  ssl:
+    process.env.DB_SSL === "true"
+      ? {
+          rejectUnauthorized: false,
+        }
+      : false,
 });
 
 pool.on('error', (err) => {
