@@ -4,18 +4,33 @@ dotenv.config();
 
 const { Pool } = pg;
 
-// Si DATABASE_URL est défini (Render l'injecte parfois), on la nettoie et on ajoute sslmode
-let connectionString = process.env.DATABASE_URL || 
-  `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}/${process.env.DB_NAME}`;
+// Parser DATABASE_URL si disponible, sinon construire la chaîne
+let connectionConfig = {};
 
-// Ajouter sslmode=require si pas déjà présent
-if (!connectionString.includes('sslmode')) {
-  connectionString += connectionString.includes('?') ? '&sslmode=require' : '?sslmode=require';
+if (process.env.DATABASE_URL) {
+  // Ajouter sslmode=require si absent de DATABASE_URL
+  let dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl.includes('sslmode')) {
+    dbUrl += dbUrl.includes('?') ? '&sslmode=require' : '?sslmode=require';
+  }
+  connectionConfig = {
+    connectionString: dbUrl,
+    ssl: { rejectUnauthorized: false }
+  };
+} else {
+  // Mode de connexion classique
+  connectionConfig = {
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    ssl: { rejectUnauthorized: false }
+  };
 }
 
 const pool = new Pool({
-  connectionString,
-  ssl: { rejectUnauthorized: false }, // double sécurité
+  ...connectionConfig,
   max: 50,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
