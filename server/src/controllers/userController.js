@@ -6,6 +6,10 @@ import { getCreatableRoles, getOrganizationOwnerId, ROLES } from '../utils/acces
 async function getManagedUser(actor, targetUserId) {
   const result = await pool.query(
     `SELECT u.id, u.name, u.email, u.role, u.agent_id, u.phone, u.created_at, u.created_by,
+            u.company_name, u.company_description, u.company_rccm, u.company_ifu,
+            COALESCE(u.is_suspended, false) AS is_suspended,
+            u.suspended_at,
+            u.suspended_by,
             a.login AS agent_login
      FROM users u
      LEFT JOIN agents a ON a.id = u.agent_id
@@ -60,6 +64,10 @@ export const listUsers = async (req, res, next) => {
     if (req.user.role === 'super_admin') {
       const params = [];
       let query = `SELECT u.id, u.name, u.email, u.role, u.agent_id, u.phone, u.created_at, u.created_by,
+                          u.company_name, u.company_description, u.company_rccm, u.company_ifu,
+                          COALESCE(u.is_suspended, false) AS is_suspended,
+                          u.suspended_at,
+                          u.suspended_by,
                           a.login AS agent_login
                    FROM users u
                    LEFT JOIN agents a ON a.id = u.agent_id`;
@@ -77,17 +85,22 @@ export const listUsers = async (req, res, next) => {
     if (req.user.role === 'admin_local') {
       const params = [req.user.id];
       let query = `WITH RECURSIVE descendants AS (
-                     SELECT id, name, email, role, agent_id, phone, created_at, created_by
+                     SELECT id, name, email, role, agent_id, phone, created_at, created_by, company_name, company_description, company_rccm, company_ifu
                      FROM users
                      WHERE id = $1
                      UNION ALL
-                     SELECT u.id, u.name, u.email, u.role, u.agent_id, u.phone, u.created_at, u.created_by
+                     SELECT u.id, u.name, u.email, u.role, u.agent_id, u.phone, u.created_at, u.created_by, u.company_name, u.company_description, u.company_rccm, u.company_ifu
                      FROM users u
                      JOIN descendants d ON u.created_by = d.id
                    )
-                   SELECT d.id, d.name, d.email, d.role, d.agent_id, d.phone, d.created_at, d.created_by,
+                 SELECT d.id, d.name, d.email, d.role, d.agent_id, d.phone, d.created_at, d.created_by,
+                        d.company_name, d.company_description, d.company_rccm, d.company_ifu,
+                         COALESCE(u.is_suspended, false) AS is_suspended,
+                         u.suspended_at,
+                         u.suspended_by,
                           a.login AS agent_login
                    FROM descendants d
+                  JOIN users u ON u.id = d.id
                    LEFT JOIN agents a ON a.id = d.agent_id
                    WHERE d.id <> $1`;
 
@@ -104,6 +117,10 @@ export const listUsers = async (req, res, next) => {
     if (req.user.role === 'admin') {
       const params = [req.user.id, 'commercial'];
       let query = `SELECT u.id, u.name, u.email, u.role, u.agent_id, u.phone, u.created_at, u.created_by,
+                          u.company_name, u.company_description, u.company_rccm, u.company_ifu,
+                          COALESCE(u.is_suspended, false) AS is_suspended,
+                          u.suspended_at,
+                          u.suspended_by,
                           a.login AS agent_login
                    FROM users u
                    LEFT JOIN agents a ON a.id = u.agent_id
@@ -127,7 +144,17 @@ export const listUsers = async (req, res, next) => {
 
 export const createUser = async (req, res, next) => {
   try {
-    const { name, email, password, role = 'commercial', agent_login } = req.body;
+    const {
+      name,
+      email,
+      password,
+      role = 'commercial',
+      agent_login,
+      company_name,
+      company_description,
+      company_rccm,
+      company_ifu,
+    } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Nom, email et mot de passe sont requis' });
@@ -164,11 +191,29 @@ export const createUser = async (req, res, next) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    if (role === 'admin_local' && (!company_name || !company_rccm || !company_ifu)) {
+      return res.status(400).json({ message: "Les informations entreprise (nom, RCCM, IFU) sont obligatoires pour un admin local" });
+    }
+
     const result = await pool.query(
-      `INSERT INTO users (name, email, password, role, agent_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, email, role, agent_id, created_at, created_by`,
-      [name, email, hashedPassword, role, agentId, req.user.id],
+      `INSERT INTO users (
+        name, email, password, role, agent_id, created_by,
+        company_name, company_description, company_rccm, company_ifu
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, name, email, role, agent_id, created_at, created_by, company_name, company_description, company_rccm, company_ifu`,
+      [
+        name,
+        email,
+        hashedPassword,
+        role,
+        agentId,
+        req.user.id,
+        company_name || null,
+        company_description || null,
+        company_rccm || null,
+        company_ifu || null,
+      ],
     );
 
     try {
@@ -201,7 +246,7 @@ export const createUser = async (req, res, next) => {
 export const updateUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, email, password, role, agent_login, phone } = req.body;
+    const { name, email, password, role, agent_login, phone, company_name, company_description, company_rccm, company_ifu } = req.body;
 
     const userToUpdate = await getManagedUser(req.user, id);
     if (!userToUpdate) {
@@ -252,21 +297,32 @@ export const updateUser = async (req, res, next) => {
       }
     }
 
+    const effectiveCompanyName = company_name ?? userToUpdate.company_name;
+    const effectiveCompanyRccm = company_rccm ?? userToUpdate.company_rccm;
+    const effectiveCompanyIfu = company_ifu ?? userToUpdate.company_ifu;
+    if (nextRole === 'admin_local' && (!effectiveCompanyName || !effectiveCompanyRccm || !effectiveCompanyIfu)) {
+      return res.status(400).json({ message: "Les informations entreprise (nom, RCCM, IFU) sont obligatoires pour un admin local" });
+    }
+
     let query = `UPDATE users
                  SET name = COALESCE($1, name),
                      email = COALESCE($2, email),
                      role = COALESCE($3, role),
                      agent_id = $4,
                      phone = COALESCE($5, phone),
+                     company_name = COALESCE($6, company_name),
+                     company_description = COALESCE($7, company_description),
+                     company_rccm = COALESCE($8, company_rccm),
+                     company_ifu = COALESCE($9, company_ifu),
                      updated_at = CURRENT_TIMESTAMP`;
-    const values = [name, email, role, agentId, phone];
+    const values = [name, email, role, agentId, phone, company_name, company_description, company_rccm, company_ifu];
 
     if (password) {
       const hashedPassword = await bcrypt.hash(password, 10);
-      query += ', password = $6 WHERE id = $7 RETURNING id, name, email, role, agent_id, phone, created_at, created_by';
+      query += ', password = $10 WHERE id = $11 RETURNING id, name, email, role, agent_id, phone, created_at, created_by, company_name, company_description, company_rccm, company_ifu';
       values.push(hashedPassword, id);
     } else {
-      query += ' WHERE id = $6 RETURNING id, name, email, role, agent_id, phone, created_at, created_by';
+      query += ' WHERE id = $10 RETURNING id, name, email, role, agent_id, phone, created_at, created_by, company_name, company_description, company_rccm, company_ifu';
       values.push(id);
     }
 
@@ -320,6 +376,59 @@ export const deleteUser = async (req, res, next) => {
     });
 
     res.json({ message: 'Utilisateur supprime avec succes' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const setUserSuspension = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { suspended, reason } = req.body;
+
+    if (typeof suspended !== 'boolean') {
+      return res.status(400).json({ message: 'Le champ "suspended" doit etre un booleen' });
+    }
+
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ message: 'Seul le super-admin peut suspendre des comptes entreprise' });
+    }
+
+    const userToManage = await getManagedUser(req.user, id);
+    if (!userToManage) {
+      return res.status(404).json({ message: 'Utilisateur non trouve' });
+    }
+
+    if (userToManage.role !== 'admin_local') {
+      return res.status(400).json({ message: 'La suspension est reservee aux comptes admin_local' });
+    }
+
+    if (userToManage.role === 'super_admin') {
+      return res.status(403).json({ message: 'Impossible de suspendre un super-admin' });
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET is_suspended = $1,
+           suspended_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+           suspended_by = CASE WHEN $1 THEN $2 ELSE NULL END,
+           suspended_reason = CASE WHEN $1 THEN $3 ELSE NULL END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING id, name, email, role, agent_id, phone, created_at, created_by, COALESCE(is_suspended, false) AS is_suspended`,
+      [suspended, req.user.id, reason || null, id],
+    );
+
+    import('./notificationController.js').then((m) => {
+      m.notifyAdmins({
+        type: suspended ? 'user_suspended' : 'user_unsuspended',
+        title: suspended ? 'Compte entreprise suspendu' : 'Compte entreprise reactive',
+        message: `Le compte ${userToManage.name} a ete ${suspended ? 'suspendu' : 'reactive'} par ${req.user.name} le ${new Date().toLocaleString('fr-FR')}.`,
+        meta: { userId: id, page: '/admin/users', reason: reason || null },
+      });
+    });
+
+    return res.json(result.rows[0]);
   } catch (error) {
     next(error);
   }
