@@ -77,7 +77,9 @@ export const login = async (req, res, next) => {
     const { email, password } = req.body;
 
     const result = await pool.query(
-      `SELECT u.id, u.name, u.email, u.password, u.role, u.agent_id, u.phone, a.login as agent_login 
+      `SELECT u.id, u.name, u.email, u.password, u.role, u.agent_id, u.phone,
+              u.company_name, u.company_description, u.company_rccm, u.company_ifu,
+              COALESCE(u.is_suspended, false) AS is_suspended, a.login as agent_login 
        FROM users u 
        LEFT JOIN agents a ON u.agent_id = a.id 
        WHERE u.email = $1`,
@@ -89,6 +91,9 @@ export const login = async (req, res, next) => {
     }
 
     const user = result.rows[0];
+    if (user.is_suspended) {
+      return res.status(403).json({ message: 'Ce compte entreprise est suspendu. Contactez le super-admin.' });
+    }
 
     // Vérifier le mot de passe
     const isValidPassword = await bcrypt.compare(password, user.password);
@@ -116,7 +121,11 @@ export const login = async (req, res, next) => {
         role: user.role,
         agent_id: user.agent_id,
         phone: user.phone,
-        agent_login: user.agent_login
+        agent_login: user.agent_login,
+        company_name: user.company_name,
+        company_description: user.company_description,
+        company_rccm: user.company_rccm,
+        company_ifu: user.company_ifu,
       },
       token: accessToken,
     });
@@ -141,7 +150,7 @@ export const refreshToken = async (req, res, next) => {
 
     // Vérifier si l'utilisateur existe toujours
     const userResult = await pool.query(
-      'SELECT id, name, email, role FROM users WHERE id = $1',
+      'SELECT id, name, email, role, COALESCE(is_suspended, false) AS is_suspended FROM users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -150,6 +159,9 @@ export const refreshToken = async (req, res, next) => {
     }
 
     const user = userResult.rows[0];
+    if (user.is_suspended) {
+      return res.status(403).json({ message: 'Ce compte est suspendu' });
+    }
 
     // Générer un nouveau access token
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user.id);
@@ -217,6 +229,8 @@ export const me = async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT u.id, u.name, u.email, u.role, u.agent_id, u.created_at,
+              u.company_name, u.company_description, u.company_rccm, u.company_ifu,
+              COALESCE(u.is_suspended, false) AS is_suspended,
               a.login as agent_login, a.first_name as agent_first_name, a.last_name as agent_last_name
        FROM users u
        LEFT JOIN agents a ON u.agent_id = a.id
@@ -314,7 +328,7 @@ export const checkSessionActivity = async (req, res, next) => {
   try {
     // Vérifier si l'utilisateur existe toujours
     const userResult = await pool.query(
-      'SELECT id, name, email, role FROM users WHERE id = $1',
+      'SELECT id, name, email, role, COALESCE(is_suspended, false) AS is_suspended FROM users WHERE id = $1',
       [req.user.id]
     );
 
@@ -323,6 +337,9 @@ export const checkSessionActivity = async (req, res, next) => {
     }
 
     const user = userResult.rows[0];
+    if (user.is_suspended) {
+      return res.status(403).json({ message: 'Ce compte est suspendu' });
+    }
 
     // Générer un nouveau access token pour rafraîchir la session
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(user.id);
